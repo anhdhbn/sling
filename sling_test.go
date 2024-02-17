@@ -43,8 +43,9 @@ var modelA = FakeModel{Text: "note", FavoriteCount: 12}
 // Non-Json response decoder
 type xmlResponseDecoder struct{}
 
-func (d xmlResponseDecoder) Decode(resp *http.Response, v interface{}) error {
-	return xml.NewDecoder(resp.Body).Decode(v)
+func (d xmlResponseDecoder) Decode(b []byte, v interface{}) error {
+	r := bytes.NewReader(b)
+	return xml.NewDecoder(r).Decode(v)
 }
 
 func TestNew(t *testing.T) {
