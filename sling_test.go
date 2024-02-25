@@ -49,8 +49,8 @@ func (d xmlResponseDecoder) Decode(resp *http.Response, v interface{}) error {
 
 func TestNew(t *testing.T) {
 	sling := New()
-	if sling.httpClient != http.DefaultClient {
-		t.Errorf("expected %v, got %v", http.DefaultClient, sling.httpClient)
+	if sling.httpClient != defaultClient {
+		t.Errorf("expected %v, got %v", defaultClient, sling.httpClient)
 	}
 	if sling.header == nil {
 		t.Errorf("Header map not initialized with make")
@@ -64,17 +64,17 @@ func TestSlingNew(t *testing.T) {
 	fakeBodyProvider := jsonBodyProvider{FakeModel{}}
 
 	cases := []*Sling{
-		&Sling{httpClient: &http.Client{}, method: "GET", rawURL: "http://example.com"},
-		&Sling{httpClient: nil, method: "", rawURL: "http://example.com"},
-		&Sling{queryStructs: make([]interface{}, 0)},
-		&Sling{queryStructs: []interface{}{paramsA}},
-		&Sling{queryStructs: []interface{}{paramsA, paramsB}},
-		&Sling{bodyProvider: fakeBodyProvider},
-		&Sling{bodyProvider: fakeBodyProvider},
-		&Sling{bodyProvider: nil},
-		New().Add("Content-Type", "application/json"),
-		New().Add("A", "B").Add("a", "c").New(),
-		New().Add("A", "B").New().Add("a", "c"),
+		{httpClient: &http.Client{}, method: "GET", rawURL: "http://example.com"},
+		{httpClient: nil, method: "", rawURL: "http://example.com"},
+		{queryStructs: make([]interface{}, 0)},
+		{queryStructs: []interface{}{paramsA}},
+		{queryStructs: []interface{}{paramsA, paramsB}},
+		{bodyProvider: fakeBodyProvider},
+		{bodyProvider: fakeBodyProvider},
+		{bodyProvider: nil},
+		New().AddHeader("Content-Type", "application/json"),
+		New().AddHeader("A", "B").AddHeader("a", "c").New(),
+		New().AddHeader("A", "B").New().AddHeader("a", "c"),
 		New().BodyForm(paramsB),
 		New().BodyForm(paramsB).New(),
 	}
@@ -222,14 +222,14 @@ func TestAddHeader(t *testing.T) {
 		sling          *Sling
 		expectedHeader map[string][]string
 	}{
-		{New().Add("authorization", "OAuth key=\"value\""), map[string][]string{"Authorization": []string{"OAuth key=\"value\""}}},
+		{New().AddHeader("authorization", "OAuth key=\"value\""), map[string][]string{"Authorization": {"OAuth key=\"value\""}}},
 		// header keys should be canonicalized
-		{New().Add("content-tYPE", "application/json").Add("User-AGENT", "sling"), map[string][]string{"Content-Type": []string{"application/json"}, "User-Agent": []string{"sling"}}},
+		{New().AddHeader("content-tYPE", "application/json").AddHeader("User-AGENT", "sling"), map[string][]string{"Content-Type": {"application/json"}, "User-Agent": {"sling"}}},
 		// values for existing keys should be appended
-		{New().Add("A", "B").Add("a", "c"), map[string][]string{"A": []string{"B", "c"}}},
+		{New().AddHeader("A", "B").AddHeader("a", "c"), map[string][]string{"A": {"B", "c"}}},
 		// Add should add to values for keys added by parent Slings
-		{New().Add("A", "B").Add("a", "c").New(), map[string][]string{"A": []string{"B", "c"}}},
-		{New().Add("A", "B").New().Add("a", "c"), map[string][]string{"A": []string{"B", "c"}}},
+		{New().AddHeader("A", "B").AddHeader("a", "c").New(), map[string][]string{"A": {"B", "c"}}},
+		{New().AddHeader("A", "B").New().AddHeader("a", "c"), map[string][]string{"A": {"B", "c"}}},
 	}
 	for _, c := range cases {
 		// type conversion from header to alias'd map for deep equality comparison
@@ -246,11 +246,11 @@ func TestSetHeader(t *testing.T) {
 		expectedHeader map[string][]string
 	}{
 		// should replace existing values associated with key
-		{New().Add("A", "B").Set("a", "c"), map[string][]string{"A": []string{"c"}}},
-		{New().Set("content-type", "A").Set("Content-Type", "B"), map[string][]string{"Content-Type": []string{"B"}}},
+		{New().AddHeader("A", "B").SetHeader("a", "c"), map[string][]string{"A": {"c"}}},
+		{New().SetHeader("content-type", "A").SetHeader("Content-Type", "B"), map[string][]string{"Content-Type": {"B"}}},
 		// Set should replace values received by copying parent Slings
-		{New().Set("A", "B").Add("a", "c").New(), map[string][]string{"A": []string{"B", "c"}}},
-		{New().Add("A", "B").New().Set("a", "c"), map[string][]string{"A": []string{"c"}}},
+		{New().SetHeader("A", "B").AddHeader("a", "c").New(), map[string][]string{"A": {"B", "c"}}},
+		{New().AddHeader("A", "B").New().SetHeader("a", "c"), map[string][]string{"A": {"c"}}},
 	}
 	for _, c := range cases {
 		// type conversion from Header to alias'd map for deep equality comparison
@@ -343,10 +343,10 @@ func TestBodyJSONSetter(t *testing.T) {
 			t.Errorf("expected %v, got %v", c.expected, sling.bodyProvider)
 		}
 		// Header Content-Type should be application/json if bodyJSON arg was non-nil
-		if c.input != nil && sling.header.Get(contentType) != jsonContentType {
-			t.Errorf("Incorrect or missing header, expected %s, got %s", jsonContentType, sling.header.Get(contentType))
-		} else if c.input == nil && sling.header.Get(contentType) != "" {
-			t.Errorf("did not expect a Content-Type header, got %s", sling.header.Get(contentType))
+		if c.input != nil && sling.header.Get(hdrContentTypeKey) != jsonContentType {
+			t.Errorf("Incorrect or missing header, expected %s, got %s", jsonContentType, sling.header.Get(hdrContentTypeKey))
+		} else if c.input == nil && sling.header.Get(hdrContentTypeKey) != "" {
+			t.Errorf("did not expect a Content-Type header, got %s", sling.header.Get(hdrContentTypeKey))
 		}
 	}
 }
@@ -375,10 +375,10 @@ func TestBodyFormSetter(t *testing.T) {
 			t.Errorf("expected %v, got %v", c.expected, sling.bodyProvider)
 		}
 		// Content-Type should be application/x-www-form-urlencoded if bodyStruct was non-nil
-		if c.input != nil && sling.header.Get(contentType) != formContentType {
-			t.Errorf("Incorrect or missing header, expected %s, got %s", formContentType, sling.header.Get(contentType))
-		} else if c.input == nil && sling.header.Get(contentType) != "" {
-			t.Errorf("did not expect a Content-Type header, got %s", sling.header.Get(contentType))
+		if c.input != nil && sling.header.Get(hdrContentTypeKey) != formContentType {
+			t.Errorf("Incorrect or missing header, expected %s, got %s", formContentType, sling.header.Get(hdrContentTypeKey))
+		} else if c.input == nil && sling.header.Get(hdrContentTypeKey) != "" {
+			t.Errorf("did not expect a Content-Type header, got %s", sling.header.Get(hdrContentTypeKey))
 		}
 	}
 }
@@ -506,7 +506,7 @@ func TestRequest_body(t *testing.T) {
 			t.Errorf("expected Request.Body %s, got %s", c.expectedBody, value)
 		}
 		// Header Content-Type should be expectedContentType ("" means no contentType expected)
-		if actualHeader := req.Header.Get(contentType); actualHeader != c.expectedContentType && c.expectedContentType != "" {
+		if actualHeader := req.Header.Get(hdrContentTypeKey); actualHeader != c.expectedContentType && c.expectedContentType != "" {
 			t.Errorf("Incorrect or missing header, expected %s, got %s", c.expectedContentType, actualHeader)
 		}
 	}
@@ -525,7 +525,7 @@ func TestRequest_bodyNoData(t *testing.T) {
 			t.Errorf("expected nil Request.Body, got %v", req.Body)
 		}
 		// Header Content-Type should not be set when bodyJSON argument was nil or never called
-		if actualHeader := req.Header.Get(contentType); actualHeader != "" {
+		if actualHeader := req.Header.Get(hdrContentTypeKey); actualHeader != "" {
 			t.Errorf("did not expect a Content-Type header, got %s", actualHeader)
 		}
 	}
@@ -555,20 +555,20 @@ func TestRequest_headers(t *testing.T) {
 		sling          *Sling
 		expectedHeader map[string][]string
 	}{
-		{New().Add("authorization", "OAuth key=\"value\""), map[string][]string{"Authorization": []string{"OAuth key=\"value\""}}},
+		{New().AddHeader("authorization", "OAuth key=\"value\""), map[string][]string{"Authorization": {"OAuth key=\"value\""}}},
 		// header keys should be canonicalized
-		{New().Add("content-tYPE", "application/json").Add("User-AGENT", "sling"), map[string][]string{"Content-Type": []string{"application/json"}, "User-Agent": []string{"sling"}}},
+		{New().AddHeader("content-tYPE", "application/json").AddHeader("User-AGENT", "sling"), map[string][]string{"Content-Type": {"application/json"}, "User-Agent": {"sling"}}},
 		// values for existing keys should be appended
-		{New().Add("A", "B").Add("a", "c"), map[string][]string{"A": []string{"B", "c"}}},
+		{New().AddHeader("A", "B").AddHeader("a", "c"), map[string][]string{"A": {"B", "c"}}},
 		// Add should add to values for keys added by parent Slings
-		{New().Add("A", "B").Add("a", "c").New(), map[string][]string{"A": []string{"B", "c"}}},
-		{New().Add("A", "B").New().Add("a", "c"), map[string][]string{"A": []string{"B", "c"}}},
+		{New().AddHeader("A", "B").AddHeader("a", "c").New(), map[string][]string{"A": {"B", "c"}}},
+		{New().AddHeader("A", "B").New().AddHeader("a", "c"), map[string][]string{"A": {"B", "c"}}},
 		// Add and Set
-		{New().Add("A", "B").Set("a", "c"), map[string][]string{"A": []string{"c"}}},
-		{New().Set("content-type", "A").Set("Content-Type", "B"), map[string][]string{"Content-Type": []string{"B"}}},
+		{New().AddHeader("A", "B").SetHeader("a", "c"), map[string][]string{"A": {"c"}}},
+		{New().SetHeader("content-type", "A").SetHeader("Content-Type", "B"), map[string][]string{"Content-Type": {"B"}}},
 		// Set should replace values received by copying parent Slings
-		{New().Set("A", "B").Add("a", "c").New(), map[string][]string{"A": []string{"B", "c"}}},
-		{New().Add("A", "B").New().Set("a", "c"), map[string][]string{"A": []string{"c"}}},
+		{New().SetHeader("A", "B").AddHeader("a", "c").New(), map[string][]string{"A": {"B", "c"}}},
+		{New().AddHeader("A", "B").New().SetHeader("a", "c"), map[string][]string{"A": {"c"}}},
 	}
 	for _, c := range cases {
 		req, _ := c.sling.Request()
@@ -595,7 +595,7 @@ func TestAddQueryStructs(t *testing.T) {
 	}
 	for _, c := range cases {
 		reqURL, _ := url.Parse(c.rawurl)
-		addQueryStructs(reqURL, c.queryStructs)
+		buildQueryParamUrl(reqURL, c.queryStructs, map[string]string{})
 		if reqURL.String() != c.expected {
 			t.Errorf("expected %s, got %s", c.expected, reqURL.String())
 		}
