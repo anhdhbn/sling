@@ -375,10 +375,10 @@ func FromRequest(r *http.Request) (*Request, error) {
 	return &Request{bodyReader, r}, nil
 }
 
-func (c *RetryDoer) Do(req *http.Request) (*http.Response, error) {
+func (c *RetryDoer) Do(req *http.Request) (*http.Response, []byte, error) {
 	re, err := FromRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return c.DoCustom(re)
 }
@@ -398,7 +398,7 @@ func (c *RetryDoer) logger(ctx context.Context) Logger {
 }
 
 // Do wraps calling an HTTP method with retries.
-func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
+func (c *RetryDoer) DoCustom(req *Request) (*http.Response, []byte, error) {
 	logger := c.logger(req.Context())
 
 	logger.WithFields(Fields{"method": req.Method, "url": req.URL}).Info("performing request")
@@ -407,6 +407,7 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 	var attempt int
 	var shouldRetry bool
 	var doErr, checkErr error
+	var rawData []byte
 
 	for i := 0; ; i++ {
 		attempt++
@@ -415,11 +416,11 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 
 		// Always rewind the request body when non-nil.
 		if err := req.rewind(); err != nil {
-			return resp, err
+			return resp, nil, err
 		}
 
 		// Attempt the request
-		resp, doErr = c.HTTPClient.Do(req.Request)
+		resp, rawData, doErr = c.HTTPClient.Do(req.Request)
 		if resp != nil {
 			code = resp.StatusCode
 		}
@@ -457,7 +458,7 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 		logger.WithFields(Fields{"request": desc, "timeout": wait, "remaining": remain}).Info("retrying request")
 		select {
 		case <-req.Context().Done():
-			return nil, req.Context().Err()
+			return nil, nil, req.Context().Err()
 		case <-time.After(wait):
 		}
 
@@ -469,7 +470,7 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 
 	// this is the closest we have to success criteria
 	if doErr == nil && checkErr == nil && !shouldRetry {
-		return resp, nil
+		return resp, rawData, nil
 	}
 
 	err := doErr
@@ -478,7 +479,8 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 	}
 
 	if c.ErrorHandler != nil {
-		return c.ErrorHandler(resp, err, attempt)
+		resp, err = c.ErrorHandler(resp, err, attempt)
+		return resp, rawData, err
 	}
 
 	// By default, we close the response body and return an error without
@@ -493,10 +495,10 @@ func (c *RetryDoer) DoCustom(req *Request) (*http.Response, error) {
 	// this means CheckRetry thought the request was a failure, but didn't
 	// communicate why
 	if err == nil {
-		return nil, fmt.Errorf("%s %s giving up after %d attempt(s)",
+		return resp, nil, fmt.Errorf("%s %s giving up after %d attempt(s)",
 			req.Method, req.URL, attempt)
 	}
 
-	return nil, fmt.Errorf("%s %s giving up after %d attempt(s): %w",
+	return resp, nil, fmt.Errorf("%s %s giving up after %d attempt(s): %w",
 		req.Method, req.URL, attempt, err)
 }

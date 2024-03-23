@@ -10,11 +10,13 @@ type Raw []byte
 // Response is a http response wrapper
 type Response struct {
 	*http.Response
+	RawData []byte
 }
 
-func NewResponse(response *http.Response) *Response {
+func NewResponse(response *http.Response, rawData []byte) *Response {
 	return &Response{
 		Response: response,
+		RawData:  rawData,
 	}
 }
 

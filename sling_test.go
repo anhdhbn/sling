@@ -43,8 +43,9 @@ var modelA = FakeModel{Text: "note", FavoriteCount: 12}
 // Non-Json response decoder
 type xmlResponseDecoder struct{}
 
-func (d xmlResponseDecoder) Decode(resp *http.Response, v interface{}) error {
-	return xml.NewDecoder(resp.Body).Decode(v)
+func (d xmlResponseDecoder) Decode(b []byte, v interface{}) error {
+	r := bytes.NewReader(b)
+	return xml.NewDecoder(r).Decode(v)
 }
 
 func TestNew(t *testing.T) {
@@ -64,7 +65,7 @@ func TestSlingNew(t *testing.T) {
 	fakeBodyProvider := jsonBodyProvider{FakeModel{}}
 
 	cases := []*Sling{
-		{httpClient: &http.Client{}, method: "GET", rawURL: "http://example.com"},
+		{httpClient: NewHttpWrapper(&http.Client{}), method: "GET", rawURL: "http://example.com"},
 		{httpClient: nil, method: "", rawURL: "http://example.com"},
 		{queryStructs: make([]interface{}, 0)},
 		{queryStructs: []interface{}{paramsA}},
@@ -117,12 +118,12 @@ func TestSlingNew(t *testing.T) {
 }
 
 func TestClientSetter(t *testing.T) {
-	developerClient := &http.Client{}
+	developerClient := NewHttpWrapper(&http.Client{})
 	cases := []struct {
-		input    *http.Client
-		expected *http.Client
+		input    *HttpWrapper
+		expected *HttpWrapper
 	}{
-		{nil, http.DefaultClient},
+		{nil, defaultClient},
 		{developerClient, developerClient},
 	}
 	for _, c := range cases {
@@ -135,12 +136,12 @@ func TestClientSetter(t *testing.T) {
 }
 
 func TestDoerSetter(t *testing.T) {
-	developerClient := &http.Client{}
+	developerClient := NewHttpWrapper(&http.Client{})
 	cases := []struct {
 		input    Doer
 		expected Doer
 	}{
-		{nil, http.DefaultClient},
+		{nil, defaultClient},
 		{developerClient, developerClient},
 	}
 	for _, c := range cases {
@@ -620,7 +621,7 @@ func TestDo_onSuccess(t *testing.T) {
 		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
 	})
 
-	sling := New().Client(client)
+	sling := New().Client(NewHttpWrapper(client))
 	req, _ := http.NewRequest("GET", "http://example.com/success", nil)
 
 	model := new(FakeModel)
@@ -649,7 +650,7 @@ func TestDo_onSuccessWithNilValue(t *testing.T) {
 		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
 	})
 
-	sling := New().Client(client)
+	sling := New().Client(NewHttpWrapper(client))
 	req, _ := http.NewRequest("GET", "http://example.com/success", nil)
 
 	apiError := new(APIError)
@@ -674,7 +675,7 @@ func TestDo_noContent(t *testing.T) {
 		w.WriteHeader(204)
 	})
 
-	sling := New().Client(client)
+	sling := New().Client(NewHttpWrapper(client))
 	req, _ := http.NewRequest("DELETE", "http://example.com/nocontent", nil)
 
 	model := new(FakeModel)
@@ -709,7 +710,7 @@ func TestDo_onFailure(t *testing.T) {
 		fmt.Fprintf(w, `{"message": "Invalid argument", "code": 215}`)
 	})
 
-	sling := New().Client(client)
+	sling := New().Client(NewHttpWrapper(client))
 	req, _ := http.NewRequest("GET", "http://example.com/failure", nil)
 
 	model := new(FakeModel)
@@ -739,7 +740,7 @@ func TestDo_onFailureWithNilValue(t *testing.T) {
 		fmt.Fprintf(w, `{"message": "Enhance your calm", "code": 88}`)
 	})
 
-	sling := New().Client(client)
+	sling := New().Client(NewHttpWrapper(client))
 	req, _ := http.NewRequest("GET", "http://example.com/failure", nil)
 
 	model := new(FakeModel)
@@ -771,7 +772,7 @@ func TestReceive_success_nonDefaultDecoder(t *testing.T) {
 		fmt.Fprint(w, data)
 	})
 
-	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
+	endpoint := New().Client(NewHttpWrapper(client)).Base("http://example.com/").Path("foo/").Post("submit")
 
 	model := new(FakeModel)
 	apiError := new(APIError)
@@ -804,7 +805,7 @@ func TestReceive_success(t *testing.T) {
 		fmt.Fprintf(w, `{"text": "Some text", "favorite_count": 24}`)
 	})
 
-	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
+	endpoint := New().Client(NewHttpWrapper(client)).Base("http://example.com/").Path("foo/").Post("submit")
 	// encode url-tagged struct in query params and as post body for testing purposes
 	params := FakeParams{KindName: "vanilla", Count: 11}
 	model := new(FakeModel)
@@ -836,7 +837,7 @@ func TestReceive_StatusOKNoContent(t *testing.T) {
 		w.Header().Set("Location", "/foo/latest")
 	})
 
-	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
+	endpoint := New().Client(NewHttpWrapper(client)).Base("http://example.com/").Path("foo/").Post("submit")
 	// fake a post response for testing purposes, checking that it's valid happens in other tests
 	params := FakeParams{}
 	model := new(FakeModel)
@@ -871,7 +872,7 @@ func TestReceive_failure(t *testing.T) {
 		fmt.Fprintf(w, `{"message": "Rate limit exceeded", "code": 88}`)
 	})
 
-	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Post("submit")
+	endpoint := New().Client(NewHttpWrapper(client)).Base("http://example.com/").Path("foo/").Post("submit")
 	// encode url-tagged struct in query params and as post body for testing purposes
 	params := FakeParams{KindName: "vanilla", Count: 11}
 	model := new(FakeModel)
@@ -902,7 +903,7 @@ func TestReceive_noContent(t *testing.T) {
 		w.WriteHeader(204)
 	})
 
-	endpoint := New().Client(client).Base("http://example.com/").Path("foo/").Head("submit")
+	endpoint := New().Client(NewHttpWrapper(client)).Base("http://example.com/").Path("foo/").Head("submit")
 	resp, err := endpoint.New().Receive(nil, nil)
 
 	if err != nil {
@@ -944,7 +945,7 @@ func TestReuseTcpConnections(t *testing.T) {
 
 	go server.Serve(ln)
 
-	endpoint := New().Client(http.DefaultClient).Base(rawURL).Path("foo/").Get("get")
+	endpoint := New().Client(NewHttpWrapper(http.DefaultClient)).Base(rawURL).Path("foo/").Get("get")
 
 	for i := 0; i < 10; i++ {
 		resp, err := endpoint.New().Receive(nil, nil)

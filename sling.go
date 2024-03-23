@@ -36,7 +36,7 @@ const (
 // wrap *http.Client with layers of Doers to form a stack of client-side
 // middleware.
 type Doer interface {
-	Do(req *http.Request) (*http.Response, error)
+	Do(req *http.Request) (*http.Response, []byte, error)
 }
 
 // Sling is an HTTP Request builder and sender.
@@ -61,9 +61,9 @@ type Sling struct {
 	isSuccess SuccessDecider
 }
 
-var defaultClient = &http.Client{
+var defaultClient = NewHttpWrapper(&http.Client{
 	Transport: otelhttp.NewTransport(http.DefaultTransport),
-}
+})
 
 // New returns a new Sling with an http DefaultClient.
 func New() *Sling {
@@ -113,18 +113,18 @@ func (s *Sling) New() *Sling {
 
 // Client sets the http Client used to do requests. If a nil client is given,
 // the http.DefaultClient will be used.
-func (s *Sling) Client(httpClient *http.Client) *Sling {
-	if httpClient == nil {
-		return s.Doer(http.DefaultClient)
+func (s *Sling) Client(httpWrapper *HttpWrapper) *Sling {
+	if httpWrapper == nil {
+		return s.Doer(defaultClient)
 	}
-	return s.Doer(httpClient)
+	return s.Doer(httpWrapper)
 }
 
 // Doer sets the custom Doer implementation used to do requests.
 // If a nil client is given, the http.DefaultClient will be used.
 func (s *Sling) Doer(doer Doer) *Sling {
 	if doer == nil {
-		s.httpClient = http.DefaultClient
+		s.httpClient = defaultClient
 	} else {
 		s.httpClient = doer
 	}
@@ -454,29 +454,21 @@ func (s *Sling) Receive(successV, failureV interface{}) (*Response, error) {
 // decoding is skipped. Any error sending the request or decoding the response
 // is returned.
 func (s *Sling) Do(req *http.Request, successV, failureV interface{}) (*Response, error) {
-	resp, err := s.httpClient.Do(req)
+	resp, rawData, err := s.httpClient.Do(req)
 	if err != nil {
-		return NewResponse(resp), err
+		return NewResponse(resp, rawData), err
 	}
-	// when err is nil, resp contains a non-nil resp.Body which must be closed
-	defer resp.Body.Close()
-
-	// The default HTTP client's Transport may not
-	// reuse HTTP/1.x "keep-alive" TCP connections if the Body is
-	// not read to completion and closed.
-	// See: https://golang.org/pkg/net/http/#Response
-	defer io.Copy(io.Discard, resp.Body)
 
 	// Don't try to decode on 204s or Content-Length is 0
 	if resp.StatusCode == http.StatusNoContent || resp.ContentLength == 0 {
-		return NewResponse(resp), nil
+		return NewResponse(resp, rawData), nil
 	}
 
 	// Decode from json
 	if successV != nil || failureV != nil {
-		err = decodeResponse(resp, s.isSuccess, s.responseDecoder, successV, failureV)
+		err = decodeResponse(resp, rawData, s.isSuccess, s.responseDecoder, successV, failureV)
 	}
-	return NewResponse(resp), err
+	return NewResponse(resp, rawData), err
 }
 
 // decodeResponse decodes response Body into the value pointed to by successV
@@ -484,28 +476,26 @@ func (s *Sling) Do(req *http.Request, successV, failureV interface{}) (*Response
 // otherwise. If the successV or failureV argument to decode into is nil,
 // decoding is skipped.
 // Caller is responsible for closing the resp.Body.
-func decodeResponse(resp *http.Response, isSuccess SuccessDecider, decoder ResponseDecoder, successV, failureV interface{}) error {
+func decodeResponse(resp *http.Response, rawData []byte, isSuccess SuccessDecider, decoder ResponseDecoder, successV, failureV interface{}) error {
 	if isSuccess(resp) {
 		switch sv := successV.(type) {
 		case nil:
 			return nil
 		case *Raw:
-			respBody, err := io.ReadAll(resp.Body)
-			*sv = respBody
-			return err
+			*sv = rawData
+			return nil
 		default:
-			return decoder.Decode(resp, successV)
+			return decoder.Decode(rawData, successV)
 		}
 	} else {
 		switch fv := failureV.(type) {
 		case nil:
 			return nil
 		case *Raw:
-			respBody, err := io.ReadAll(resp.Body)
-			*fv = respBody
-			return err
+			*fv = rawData
+			return nil
 		default:
-			return decoder.Decode(resp, failureV)
+			return decoder.Decode(rawData, failureV)
 		}
 	}
 }
